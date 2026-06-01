@@ -96,7 +96,7 @@ export default function App() {
 
   const toolDefinitions = useMemo(() => {
     return toolkits.flatMap((tk) => tk.actions).map((a) =>
-      `- **${a.name}** (${a.risk} risk): ${a.description}\n  Target: ${a.targetPolicy.allowedAssetTypes.join(', ') || 'none'}\n  Params: ${a.params.map((p) => `${p.label}${p.required ? '*' : ''}`).join(', ')}`
+      `- **${a.name}** (${a.risk}): ${a.description.split(".")[0]}`
     ).join('\n');
   }, []);
 
