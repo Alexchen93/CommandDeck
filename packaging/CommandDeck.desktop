@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CommandDeck
+Comment=Command workspace app
+Exec=/home/alex/文件/CommandDeck/start-app.sh
+Path=/home/alex/文件/CommandDeck
+Terminal=false
+Categories=Development;System;
+StartupNotify=true

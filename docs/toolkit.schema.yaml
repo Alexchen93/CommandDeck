@@ -1,0 +1,54 @@
+id: kali-authorized
+name: Kali Toolkit
+version: 0.1.0
+description: Authorized security testing actions only.
+permissions:
+  - network.scan
+  - container.execute
+execution:
+  defaultExecutor: container
+  allowedExecutors:
+    - container
+    - vm
+  requireAuthorizedAssets: true
+  denyRawShell: true
+actions:
+  - id: nmap_tcp_scan
+    name: Nmap TCP Scan
+    risk: medium
+    description: Run a TCP scan against an authorized asset.
+    executor: container
+    image: kali-tools:latest
+    paramsSchema:
+      type: object
+      required:
+        - targetAssetId
+        - ports
+      properties:
+        targetAssetId:
+          type: string
+          format: authorized-asset-id
+        ports:
+          type: string
+          pattern: "^[0-9,\\-]{1,64}$"
+        timing:
+          type: string
+          enum:
+            - T2
+            - T3
+            - T4
+          default: T3
+    command:
+      shell: false
+      argv:
+        - nmap
+        - -sT
+        - -p
+        - "${params.ports}"
+        - "-${params.timing}"
+        - "${asset.value}"
+      timeoutSeconds: 300
+    parser:
+      type: nmap-text
+    renderer:
+      type: NmapResultRenderer

@@ -1,0 +1,74 @@
+{
+  "name": "commanddeck",
+  "version": "0.6.4",
+  "description": "A desktop command workspace app for terminal blocks, toolkit actions, jobs, and live output.",
+  "homepage": "https://commanddeck.local",
+  "author": "Alex Chen",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "NODE_ENV=development concurrently -k \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 dist-electron/main.js && electron --no-sandbox .\"",
+    "build": "tsc -p tsconfig.json && vite build && tsc -p tsconfig.electron.json",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "electron:version": "electron --no-sandbox --version",
+    "package:deb": "npm run build && electron-builder --linux deb --x64"
+  },
+  "build": {
+    "appId": "uk.priveate.commanddeck",
+    "productName": "CommandDeck",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Development",
+      "maintainer": "Alex Chen",
+      "synopsis": "Desktop command workspace app",
+      "description": "CommandDeck is a desktop command workspace app for terminal blocks, toolkit actions, jobs, live output, authorized assets, and renderers."
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils"
+      ]
+    }
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "lucide-react": "^0.468.0",
+    "node-pty": "^1.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}
