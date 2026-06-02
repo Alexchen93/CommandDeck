@@ -857,6 +857,32 @@ pre {
   padding: 8px 14px 10px;
 }
 
+.ai-context-toggle {
+  align-items: center;
+  background: #10161d;
+  border: 1px solid #26343f;
+  color: #8797a5;
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 5px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.ai-context-toggle:hover {
+  background: #162330;
+  color: #c7d5e2;
+}
+
+.ai-context-toggle.active {
+  background: #173226;
+  border-color: #347f5c;
+  color: #9ee0bd;
+}
+
 .ai-input {
   background: #10161d;
   border: 1px solid #2b3946;
@@ -1282,6 +1308,32 @@ pre {
   color: #c8dae8;
 }
 
+.provider-json-field {
+  margin-top: 12px;
+}
+
+.provider-json-input {
+  background: #0d141d;
+  border: 1px solid #2b3946;
+  border-radius: 7px;
+  color: #c8dae8;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+  padding: 10px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.provider-json-input:focus {
+  border-color: #65a9d6;
+}
+
+.provider-json-save {
+  margin-top: 4px;
+}
+
 /* ── Tool Selector ── */
 .ai-tool-selector {
   border-top: 1px solid #283641;
@@ -1430,4 +1482,70 @@ pre {
   flex-wrap: wrap;
   gap: 2px;
   padding: 5px 8px;
+}
+
+/* ── Tool Search ── */
+.ai-tool-search {
+  align-items: center;
+  background: #15232e;
+  border: 1px solid #2a4a5e;
+  border-radius: 6px;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 10px;
+}
+
+.ai-tool-search input {
+  background: transparent;
+  border: none;
+  color: #dce5ec;
+  flex: 1;
+  font-size: 12px;
+  outline: none;
+}
+
+.ai-tool-search input::placeholder {
+  color: #546e7a;
+}
+
+.ai-tool-search-clear {
+  background: none;
+  border: none;
+  color: #546e7a;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.ai-tool-search-clear:hover {
+  color: #dce5ec;
+}
+
+/* ── Stop button ── */
+.ai-stop-btn {
+  background: #c24a3a !important;
+}
+
+.ai-stop-btn:hover {
+  background: #d65a4a !important;
+}
+
+/* ── Retry button ── */
+.ai-retry-btn {
+  align-items: center;
+  background: #1e3140;
+  border: 1px solid #3a5a6e;
+  border-radius: 5px;
+  color: #9bd1f0;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  transition: background 0.15s;
+}
+
+.ai-retry-btn:hover {
+  background: #2b4052;
 }

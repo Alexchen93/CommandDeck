@@ -1,0 +1,56 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "endpoint": "https://api.openai.com",
+    "apiKey": "",
+    "defaultModel": "gpt-4o",
+    "models": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
+    "requiresAuth": true
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama (Local)",
+    "endpoint": "http://localhost:11434/v1",
+    "apiKey": "",
+    "defaultModel": "",
+    "models": [],
+    "requiresAuth": false
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "endpoint": "https://openrouter.ai/api/v1",
+    "apiKey": "",
+    "defaultModel": "openai/gpt-4o",
+    "models": [],
+    "requiresAuth": true
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "endpoint": "https://api.groq.com/openai/v1",
+    "apiKey": "",
+    "defaultModel": "llama-3.3-70b-versatile",
+    "models": [],
+    "requiresAuth": true
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "endpoint": "https://api.deepseek.com/v1",
+    "apiKey": "",
+    "defaultModel": "deepseek-chat",
+    "models": [],
+    "requiresAuth": true
+  },
+  {
+    "id": "custom",
+    "name": "自訂 / Custom",
+    "endpoint": "",
+    "apiKey": "",
+    "defaultModel": "",
+    "models": [],
+    "requiresAuth": true
+  }
+]

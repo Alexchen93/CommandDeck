@@ -228,21 +228,38 @@ export default function App() {
     }
   }
 
-  function getTerminalContext(): string {
-    const lines: string[] = [];
-    for (const [sessionId, terminal] of xtermRefs.current.entries()) {
-      const session = sessions.find((s) => s.id === sessionId);
-      const name = session?.name ?? sessionId;
+  function getTerminalContext(sessionId?: string): string {
+    const MAX_CHARS = 2000;
+    const LINES_PER_SESSION = 20;
+    const targets = sessionId
+      ? [[sessionId, xtermRefs.current.get(sessionId)] as const].filter(([, t]) => t)
+      : Array.from(xtermRefs.current.entries());
+
+    const sections: string[] = [];
+    let totalChars = 0;
+
+    for (const [sid, terminal] of targets) {
+      if (!terminal) continue;
+      const session = sessions.find((s) => s.id === sid);
+      const name = session?.name ?? sid;
       const buffer = terminal.buffer.active;
       const lastLines: string[] = [];
-      for (let i = Math.max(0, buffer.length - 30); i < buffer.length; i++) {
+      for (let i = Math.max(0, buffer.length - LINES_PER_SESSION); i < buffer.length; i++) {
         const line = buffer.getLine(i);
         if (line) lastLines.push(line.translateToString());
       }
-      lines.push(`[${name}]`);
-      lines.push(lastLines.join('\n'));
+      const section = `[${name}]\n${lastLines.join('\n')}`;
+      if (totalChars + section.length > MAX_CHARS) {
+        const remaining = MAX_CHARS - totalChars - 50;
+        if (remaining > 100) {
+          sections.push(section.slice(0, remaining) + '\n...(truncated)');
+        }
+        break;
+      }
+      sections.push(section);
+      totalChars += section.length;
     }
-    return lines.join('\n') || '(no terminal output)';
+    return sections.join('\n\n') || '(no terminal output)';
   }
 
   function handleWriteAICommand(command: string) {
@@ -404,6 +421,7 @@ export default function App() {
             <AIPanel
               lang={lang}
               settings={aiSettings}
+              activeSessionId={activeSessionId}
               toolDefinitions={toolDefinitions}
               onGetTerminalContext={getTerminalContext}
               onWriteToTerminal={handleWriteAICommand}

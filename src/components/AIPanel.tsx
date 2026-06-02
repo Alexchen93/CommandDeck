@@ -1,22 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Check, ChevronDown, ChevronRight, Copy, Play, Send, Settings, Trash2, X } from "lucide-react";
-import { type AIMessage, type AISettings, buildSystemPrompt, chatWithAI } from "../ai/client";
+import { Bot, Check, Copy, Play, RefreshCw, Send, Settings, Square, Terminal, Trash2, X } from "lucide-react";
+import {
+  type AIMessage,
+  type AISettings,
+  type ChatEntry,
+  buildSystemPrompt,
+  clearChatHistory,
+  loadChatHistory,
+  saveChatHistory,
+  streamChat,
+} from "../ai/client";
 import type { Language } from "../i18n/translations";
-import { toolkits } from "../data/sampleData";
 
-type ChatEntry = {
-  role: "user" | "assistant";
-  text: string;
-  command?: string;
-};
+const TERMINAL_ASSIST_STORAGE_KEY = "commanddeck:ai:terminal-assist";
 
 type AIPanelProps = {
   lang: Language;
   settings: AISettings;
+  activeSessionId: string;
   toolDefinitions: string;
-  onGetTerminalContext: () => string;
+  onGetTerminalContext: (sessionId?: string) => string;
   onWriteToTerminal: (command: string) => void;
   onOpenSettings: () => void;
   onClose: () => void;
@@ -25,6 +30,7 @@ type AIPanelProps = {
 export function AIPanel({
   lang,
   settings,
+  activeSessionId,
   toolDefinitions: _unused,
   onGetTerminalContext,
   onWriteToTerminal,
@@ -32,139 +38,171 @@ export function AIPanel({
   onClose
 }: AIPanelProps) {
   const [input, setInput] = useState("");
-  const [chat, setChat] = useState<ChatEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [chat, setChat] = useState<ChatEntry[]>(() => loadChatHistory());
+  const [streaming, setStreaming] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [toolSelectorOpen, setToolSelectorOpen] = useState(false);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() =>
-    new Set(toolkits.map(tk => tk.id))
-  );
-  const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => {
-    const allIds = toolkits.flatMap(tk => tk.actions).map(a => a.id);
-    return new Set(allIds);
+  const [terminalAssistEnabled, setTerminalAssistEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(TERMINAL_ASSIST_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
   });
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat, loading]);
+  }, [chat, streaming]);
 
-  const filteredToolDefinitions = useMemo(() => {
-    return toolkits
-      .flatMap(tk => tk.actions)
-      .filter(a => selectedToolIds.has(a.id))
-      .map(a => `- **${a.name}** (${a.risk}): ${a.description.split(".")[0]}`)
-      .join("\n");
-  }, [selectedToolIds]);
+  // Persist chat after each change
+  const persistAndSetChat = useCallback((updater: ChatEntry[] | ((prev: ChatEntry[]) => ChatEntry[])) => {
+    setChat(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveChatHistory(next);
+      return next;
+    });
+  }, []);
 
-  const allToolIds = useMemo(() =>
-    new Set(toolkits.flatMap(tk => tk.actions).map(a => a.id)),
-  []);
-
-  function toggleAllTools() {
-    if (selectedToolIds.size === allToolIds.size) {
-      setSelectedToolIds(new Set());
-    } else {
-      setSelectedToolIds(new Set(allToolIds));
-    }
-  }
-
-  function toggleTool(id: string) {
-    setSelectedToolIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+  function toggleTerminalAssist() {
+    setTerminalAssistEnabled(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(TERMINAL_ASSIST_STORAGE_KEY, next ? "1" : "0");
+      } catch { /* noop */ }
       return next;
     });
   }
 
-  function toggleCategory(toolkitId: string) {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(toolkitId)) next.delete(toolkitId); else next.add(toolkitId);
-      return next;
-    });
+  function handleStopStreaming() {
+    abortRef.current?.abort();
   }
 
-  function toggleCategoryAll(toolkitId: string) {
-    const tk = toolkits.find(t => t.id === toolkitId);
-    if (!tk) return;
-    const categoryIds = new Set(tk.actions.map(a => a.id));
-    const allSelected = tk.actions.every(a => selectedToolIds.has(a.id));
-    setSelectedToolIds(prev => {
-      const next = new Set(prev);
-      if (allSelected) {
-        categoryIds.forEach(id => next.delete(id));
-      } else {
-        categoryIds.forEach(id => next.add(id));
+  // Retry: remove the failed assistant message and re-send the user message before it
+  function handleRetry(errorIndex: number) {
+    // Find the user message that came right before this error
+    let userMessage = "";
+    let userIndex = -1;
+    for (let i = errorIndex - 1; i >= 0; i--) {
+      if (chat[i]?.role === "user") {
+        userMessage = chat[i].text;
+        userIndex = i;
+        break;
       }
-      return next;
-    });
+    }
+    if (!userMessage) return;
+
+    // Remove both the user message and the error response
+    persistAndSetChat(prev => prev.filter((_, i) => i !== errorIndex && i !== userIndex));
+    // Re-trigger send with the same message
+    doSend(userMessage);
   }
 
-  async function handleSend() {
-    const userText = input.trim();
-    if (!userText || loading) return;
-
+  async function doSend(userText: string) {
+    if (!userText || streaming) return;
     setInput("");
-    setChat((prev) => [...prev, { role: "user", text: userText }]);
-    setLoading(true);
+    persistAndSetChat(prev => [...prev, { role: "user", text: userText }]);
+    setStreaming(true);
+
+    const abortController = new AbortController();
+    abortRef.current = abortController;
 
     try {
-      const terminalContext = onGetTerminalContext();
+      const terminalContext = terminalAssistEnabled
+        ? onGetTerminalContext(activeSessionId)
+        : "(terminal context disabled)";
       const promptTemplate = settings.systemPrompt || "";
-      const systemPrompt = buildSystemPrompt(promptTemplate, filteredToolDefinitions, terminalContext);
+      const systemPrompt = buildSystemPrompt(promptTemplate, "", terminalContext);
+
+      const recentChat = chat.slice(-10);
       const messages: AIMessage[] = [
         { role: "system", content: systemPrompt },
-        ...chat.slice(-6).map((entry): AIMessage => ({
+        ...recentChat.map((entry): AIMessage => ({
           role: entry.role === "assistant" ? "assistant" : "user",
           content: entry.text
         })),
         { role: "user", content: userText }
       ];
 
-      let result = await chatWithAI(settings, messages);
-      let responseText = result.message && result.message.trim()
-        ? result.message
-        : "";
+      // Add streaming placeholder
+      persistAndSetChat(prev => [...prev, { role: "assistant", text: "" }]);
 
-      // Retry once if empty — known OpenAI API issue with short queries
-      if (!responseText && !result.message?.includes("❌")) {
-        console.log("[AI] Empty response, retrying with fallback prompt...");
-        const fallbackMessages: AIMessage[] = [
-          { role: "system", content: systemPrompt },
-          ...chat.slice(-6).map((entry): AIMessage => ({
-            role: entry.role === "assistant" ? "assistant" : "user",
-            content: entry.text
-          })),
-          { role: "user", content: `${userText}\n\n(請務必給出回應，不要回傳空白內容)` }
-        ];
-        result = await chatWithAI(settings, fallbackMessages);
-        responseText = result.message && result.message.trim()
-          ? result.message
-          : "❌ AI 未回覆內容，請嘗試換個方式提問或檢查 API 設定。";
-      } else if (!responseText) {
-        responseText = result.message || "❌ AI 未回覆內容，請檢查 API 設定或稍後再試。";
+      let fullText = "";
+      await streamChat(
+        settings,
+        messages,
+        (token) => {
+          fullText += token;
+          setChat(prev => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.role === "assistant") {
+              next[next.length - 1] = { ...last, text: fullText };
+            }
+            return next;
+          });
+        },
+        abortController.signal
+      );
+
+      const finalText = fullText.trim()
+        ? fullText
+        : "❌ AI 未回覆內容，請嘗試換個方式提問或檢查 API 設定。";
+      const command = fullText.trim() ? extractCommandFromResponse(fullText) : undefined;
+      if (terminalAssistEnabled && command) {
+        onWriteToTerminal(command);
       }
 
-      setChat((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: responseText,
-          command: result.command
+      persistAndSetChat(prev => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.role === "assistant") {
+          next[next.length - 1] = {
+            role: "assistant",
+            text: terminalAssistEnabled && command
+              ? `${finalText}\n\n_已填入目前終端機，尚未執行。_`
+              : finalText,
+            command
+          };
         }
-      ]);
-    } catch (err) {
-      setChat((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "❌ " + (err instanceof Error ? err.message : String(err))
-        }
-      ]);
+        return next;
+      });
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        persistAndSetChat(prev => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant" && !last.text.trim()) {
+            next[next.length - 1] = { ...last, text: "⏹️ 已中斷生成。" };
+          } else if (last && last.role === "assistant") {
+            next[next.length - 1] = { ...last, text: (last.text || "") + "\n\n⏹️ 已中斷生成。" };
+          }
+          return next;
+        });
+      } else {
+        persistAndSetChat(prev => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = {
+              ...last,
+              text: "❌ " + (err instanceof Error ? err.message : String(err))
+            };
+          }
+          return next;
+        });
+      }
     } finally {
-      setLoading(false);
+      setStreaming(false);
+      abortRef.current = null;
     }
+  }
+
+  async function handleSend() {
+    const userText = input.trim();
+    if (!userText || streaming) return;
+    await doSend(userText);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -176,7 +214,7 @@ export function AIPanel({
 
   function handleRunCommand(command: string) {
     onWriteToTerminal(command);
-    setChat((prev) => [...prev, { role: "assistant", text: "✅ 已傳送至終端機。" }]);
+    persistAndSetChat(prev => [...prev, { role: "assistant", text: "✅ 已傳送至終端機。" }]);
   }
 
   function handleCopy(text: string) {
@@ -195,6 +233,11 @@ export function AIPanel({
       setCopiedCode(text);
       setTimeout(() => setCopiedCode(null), 2000);
     });
+  }
+
+  function handleClearChat() {
+    persistAndSetChat([]);
+    clearChatHistory();
   }
 
   return (
@@ -220,7 +263,7 @@ export function AIPanel({
       </header>
 
       <div className="ai-chat">
-        {chat.length === 0 && !loading && (
+        {chat.length === 0 && !streaming && (
           <div className="ai-empty">
             <Bot size={32} />
             <p>{lang === "zh" ? "描述你想做什麼，AI 會幫你產生對應的指令。" : "Describe what you want to do and AI will generate the command."}</p>
@@ -296,12 +339,26 @@ export function AIPanel({
                 </div>
               </div>
             )}
+            {/* Retry button for error messages */}
+            {entry.role === "assistant" && entry.text.startsWith("❌") && !streaming && (
+              <button
+                type="button"
+                className="ai-retry-btn"
+                onClick={() => handleRetry(i)}
+                title={lang === "zh" ? "重試" : "Retry"}
+              >
+                <RefreshCw size={13} />
+                {lang === "zh" ? " 重試" : " Retry"}
+              </button>
+            )}
           </div>
         ))}
 
-        {loading && (
+        {streaming && (
           <div className="ai-message assistant">
-            <div className="ai-typing">Thinking...</div>
+            <div className="ai-typing">
+              <span className="streaming-cursor">●</span> Generating...
+            </div>
           </div>
         )}
 
@@ -317,68 +374,23 @@ export function AIPanel({
         </div>
       )}
 
-      {/* ── Category Tool Selector ── */}
-      <div className="ai-tool-selector">
+      <div className="ai-input-area">
         <button
           type="button"
-          className="ai-tool-selector-toggle"
-          onClick={() => setToolSelectorOpen(!toolSelectorOpen)}
+          className={terminalAssistEnabled ? "ai-context-toggle active" : "ai-context-toggle"}
+          onClick={toggleTerminalAssist}
         >
-          <span>🔧 {lang === "zh" ? `工具選擇 (${selectedToolIds.size}/${allToolIds.size})` : `Tools (${selectedToolIds.size}/${allToolIds.size})`}</span>
-          <ChevronDown size={14} style={{ transform: toolSelectorOpen ? "rotate(180deg)" : "", transition: "transform 0.15s" }} />
+          <Terminal size={14} />
+          <span>
+            {lang === "zh"
+              ? terminalAssistEnabled
+                ? "已開啟：讀取目前終端機並自動填入指令"
+                : "開啟終端機輔助"
+              : terminalAssistEnabled
+                ? "Terminal assist on: read active terminal and fill commands"
+                : "Enable terminal assist"}
+          </span>
         </button>
-        {toolSelectorOpen && (
-          <div className="ai-tool-selector-grid">
-            <button type="button" className="ai-tool-toggle-all" onClick={toggleAllTools}>
-              {selectedToolIds.size === allToolIds.size
-                ? (lang === "zh" ? "取消全選" : "Deselect All")
-                : (lang === "zh" ? "全選" : "Select All")}
-            </button>
-            {toolkits.map(tk => {
-              const expanded = expandedCategories.has(tk.id);
-              const catSelected = tk.actions.every(a => selectedToolIds.has(a.id));
-              const catPartial = tk.actions.some(a => selectedToolIds.has(a.id));
-              return (
-                <div key={tk.id} className="ai-tool-category">
-                  <button
-                    type="button"
-                    className="ai-tool-category-header"
-                    onClick={() => toggleCategory(tk.id)}
-                  >
-                    <ChevronRight size={12} style={{ transform: expanded ? "rotate(90deg)" : "", transition: "transform 0.1s" }} />
-                    <span className="ai-cat-name">{tk.name}</span>
-                    <span className="ai-cat-count">{tk.actions.filter(a => selectedToolIds.has(a.id)).length}/{tk.actions.length}</span>
-                    <button
-                      type="button"
-                      className="ai-cat-toggle"
-                      onClick={(e) => { e.stopPropagation(); toggleCategoryAll(tk.id); }}
-                    >
-                      {catSelected ? "−" : catPartial ? "○" : "+"}
-                    </button>
-                  </button>
-                  {expanded && (
-                    <div className="ai-tool-category-items">
-                      {tk.actions.map(action => (
-                        <label key={action.id} className="ai-tool-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={selectedToolIds.has(action.id)}
-                            onChange={() => toggleTool(action.id)}
-                          />
-                          <span className={`risk-dot risk-${action.risk}`} />
-                          <span className="ai-tool-name">{action.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="ai-input-area">
         <textarea
           className="ai-input"
           value={input}
@@ -386,28 +398,47 @@ export function AIPanel({
           onKeyDown={handleKeyDown}
           placeholder={lang === "zh" ? "輸入需求，Enter 送出..." : "Ask AI to generate a command..."}
           rows={2}
-          disabled={loading}
+          disabled={streaming}
         />
         <div className="ai-input-actions">
           <button
             type="button"
             className="ai-icon-btn"
             disabled={chat.length === 0}
-            onClick={() => setChat([])}
+            onClick={handleClearChat}
             title="Clear chat"
           >
             <Trash2 size={15} />
           </button>
-          <button
-            type="button"
-            className="run-button ai-send-btn"
-            disabled={!input.trim() || loading}
-            onClick={handleSend}
-          >
-            <Send size={15} />
-          </button>
+          {streaming ? (
+            <button
+              type="button"
+              className="run-button ai-stop-btn"
+              onClick={handleStopStreaming}
+              title={lang === "zh" ? "停止生成" : "Stop generating"}
+            >
+              <Square size={15} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="run-button ai-send-btn"
+              disabled={!input.trim()}
+              onClick={handleSend}
+            >
+              <Send size={15} />
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function extractCommandFromResponse(response: string): string | undefined {
+  const bashMatch = response.match(/```(?:bash|shell|sh)?\s*\n?([\s\S]*?)```/);
+  if (bashMatch) return bashMatch[1].trim();
+  const inlineMatch = response.match(/`([a-zA-Z0-9_\-./][^`]{2,200})`/);
+  if (inlineMatch) return inlineMatch[1].trim();
+  return undefined;
 }

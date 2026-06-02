@@ -16,7 +16,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "electron:version": "electron --no-sandbox --version",
-    "package:deb": "npm run build && electron-builder --linux deb --x64"
+    "package:deb": "bash scripts/build-deb.sh"
   },
   "build": {
     "appId": "uk.priveate.commanddeck",
